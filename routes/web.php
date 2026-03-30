@@ -11,6 +11,7 @@ use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\Admin\AdminDashboardController;
+use App\Http\Controllers\Admin\AdminServerController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ───────────────────────────────────────────────────────────
@@ -85,6 +86,16 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
 
     // Sync users & servers from VirtFusion
     Route::post('/users/sync', [AdminDashboardController::class, 'syncUsers'])->name('admin.users.sync');
+
+    // Server management
+    Route::get('/servers/{server}', [AdminServerController::class, 'show'])->name('admin.servers.show');
+    Route::post('/servers/{server}/power', [AdminServerController::class, 'power'])->name('admin.servers.power');
+    Route::post('/servers/{server}/suspend', [AdminServerController::class, 'suspend'])->name('admin.servers.suspend');
+    Route::post('/servers/{server}/unsuspend', [AdminServerController::class, 'unsuspend'])->name('admin.servers.unsuspend');
+    Route::put('/servers/{server}/rename', [AdminServerController::class, 'rename'])->name('admin.servers.rename');
+    Route::post('/servers/{server}/reset-password', [AdminServerController::class, 'resetPassword'])->name('admin.servers.reset-password');
+    Route::get('/servers/{server}/console', [AdminServerController::class, 'console'])->name('admin.servers.console');
+    Route::delete('/servers/{server}', [AdminServerController::class, 'destroy'])->name('admin.servers.destroy');
 
     // Debug: show raw VirtFusion API response (temporary)
     Route::get('/debug/vf-api', [AdminDashboardController::class, 'debugVfApi'])->name('admin.debug.vfapi');
