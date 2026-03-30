@@ -34,6 +34,29 @@
             $liveCpu = $vfServer['cpuCores'] ?? $vfServer['cpu'] ?? $vfServer['vcpus'] ?? null;
             $liveDisk = $vfServer['primaryStorage'] ?? $vfServer['disk'] ?? $vfServer['storage'] ?? null;
             $liveTraffic = $vfServer['traffic'] ?? $vfServer['bandwidth'] ?? null;
+
+            $osName = $server->os_template;
+            if (!$osName && $vfServer) {
+                $raw = $vfServer['osName'] ?? $vfServer['os'] ?? $vfServer['template'] ?? null;
+                if (is_string($raw)) {
+                    $osName = $raw;
+                } elseif (is_array($raw)) {
+                    $osName = $raw['name'] ?? $raw['label'] ?? $raw['title'] ?? json_encode($raw);
+                }
+            }
+            $osName = $osName ?: '-';
+
+            $liveHostname = $server->hostname;
+            if (!$liveHostname && $vfServer) {
+                $hRaw = $vfServer['hostname'] ?? null;
+                $liveHostname = is_string($hRaw) ? $hRaw : null;
+            }
+            $liveHostname = $liveHostname ?: '-';
+
+            if (is_array($liveMem)) $liveMem = null;
+            if (is_array($liveCpu)) $liveCpu = null;
+            if (is_array($liveDisk)) $liveDisk = null;
+            if (is_array($liveTraffic)) $liveTraffic = null;
         @endphp
 
         <div class="bg-white rounded-xl border border-gray-200 p-6">
@@ -45,7 +68,7 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Hostname</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $vfServer['hostname'] ?? $server->hostname ?? '-' }}</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveHostname }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Pakket</p>
@@ -53,7 +76,7 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">OS</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->os_template ?? ($vfServer['osName'] ?? '-') }}</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $osName }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">CPU</p>
@@ -64,7 +87,7 @@
                     @php
                         $memVal = $liveMem ?? ($server->package ? $server->package->memory : null);
                         $memDisplay = '-';
-                        if ($memVal) {
+                        if ($memVal && is_numeric($memVal)) {
                             $memDisplay = $memVal >= 1024 ? round($memVal / 1024, 1) . ' GB' : $memVal . ' MB';
                         }
                     @endphp
@@ -72,14 +95,18 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Opslag</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveDisk ?? ($server->package ? $server->package->storage : '-') }} GB NVMe SSD</p>
+                    @php
+                        $diskVal = $liveDisk ?? ($server->package ? $server->package->storage : null);
+                        $diskDisplay = is_numeric($diskVal) ? $diskVal . ' GB NVMe SSD' : '-';
+                    @endphp
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $diskDisplay }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Verkeer</p>
                     @php
                         $trafficVal = $liveTraffic ?? ($server->package ? $server->package->traffic : null);
                         $trafficDisplay = '-';
-                        if ($trafficVal !== null) {
+                        if ($trafficVal !== null && is_numeric($trafficVal)) {
                             if ($trafficVal == 0) $trafficDisplay = 'Onbeperkt';
                             elseif ($trafficVal >= 1000) $trafficDisplay = round($trafficVal / 1000, 1) . ' TB';
                             else $trafficDisplay = $trafficVal . ' GB';
