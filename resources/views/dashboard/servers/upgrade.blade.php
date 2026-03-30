@@ -128,9 +128,11 @@
         sliderGroups.forEach(group => {
             const slider = group.querySelector('input[type="range"]');
             const price = parseFloat(group.dataset.price);
+            const resource = group.dataset.resource;
             const currentVal = parseInt(group.dataset.current);
             const val = parseInt(slider.value);
-            monthly += val * price;
+            const billableUnits = (resource === 'ipv4') ? Math.max(0, val - 1) : val;
+            monthly += billableUnits * price;
 
             group.querySelector('.slider-value').textContent = val;
 

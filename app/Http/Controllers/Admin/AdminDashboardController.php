@@ -41,6 +41,16 @@ class AdminDashboardController extends Controller
         return view('admin.users', compact('users'));
     }
 
+    public function showUser(User $user)
+    {
+        $user->loadCount('servers', 'orders', 'invoices');
+        $servers = $user->servers()->with('package')->latest()->get();
+        $invoices = $user->invoices()->with('order')->latest()->take(20)->get();
+        $orders = $user->orders()->with(['server', 'package'])->latest()->take(20)->get();
+
+        return view('admin.users.show', compact('user', 'servers', 'invoices', 'orders'));
+    }
+
     public function servers()
     {
         $servers = Server::with(['user', 'package'])->latest()->paginate(25);

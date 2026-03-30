@@ -13,6 +13,7 @@ class Invoice extends Model
         'user_id',
         'order_id',
         'invoice_number',
+        'description',
         'status',
         'subtotal',
         'tax_rate',
@@ -21,6 +22,7 @@ class Invoice extends Model
         'currency',
         'due_date',
         'paid_at',
+        'notes',
     ];
 
     protected function casts(): array

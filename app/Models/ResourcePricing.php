@@ -50,7 +50,8 @@ class ResourcePricing extends Model
             $total += $storageGb * (float) $pricing['storage_gb']->price_per_unit;
         }
         if ($pricing->has('ipv4')) {
-            $total += $ipv4 * (float) $pricing['ipv4']->price_per_unit;
+            $extraIpv4 = max(0, $ipv4 - 1);
+            $total += $extraIpv4 * (float) $pricing['ipv4']->price_per_unit;
         }
 
         return round($total, 2);

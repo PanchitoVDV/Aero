@@ -57,7 +57,7 @@ class WebhookController extends Controller
         $package = $order->package;
         $user = $order->user;
 
-        if (!$server || !$package) return;
+        if (!$server) return;
 
         try {
             $server->update(['status' => 'building']);
@@ -67,10 +67,22 @@ class WebhookController extends Controller
                 $user->update(['virtfusion_user_id' => $vfUser['data']['id'] ?? null]);
             }
 
+            $vfPackageId = $package?->virtfusion_package_id;
+            if (!$vfPackageId && $server->custom_ram) {
+                $vfPackageId = $this->findClosestVfPackage($server);
+            }
+
+            if (!$vfPackageId) {
+                throw new \Exception('Geen VirtFusion package gevonden voor deze configuratie');
+            }
+
+            $ipv4Count = $server->custom_ipv4 ?? ($package ? 1 : 1);
+
             $vfServer = $this->virtfusion->createServer(
-                $package->virtfusion_package_id,
+                $vfPackageId,
                 $user->virtfusion_user_id,
                 config('virtfusion.hypervisor_group_id'),
+                ['ipv4' => $ipv4Count],
             );
 
             $vfServerId = $vfServer['data']['id'] ?? null;
@@ -88,20 +100,28 @@ class WebhookController extends Controller
 
             $ipAddress = $buildResult['data']['network']['interfaces'][0]['ipAddresses'][0]['address'] ?? null;
 
+            $nextDue = match ($order->billing_cycle) {
+                'quarterly' => now()->addMonths(3),
+                'yearly' => now()->addYear(),
+                default => now()->addMonth(),
+            };
+
             $server->update([
                 'status' => 'active',
                 'power_status' => 'online',
                 'ip_address' => $ipAddress,
-                'next_due_date' => now()->addMonth(),
+                'next_due_date' => $nextDue,
             ]);
 
             $interval = $this->mollie->getBillingInterval($order->billing_cycle);
             try {
                 $this->mollie->createSubscription($user, $order, $interval);
             } catch (\Exception $e) {
-                Log::warning('Subscription creation failed (first payment mandate may not be ready)', [
+                Log::warning('Subscription creation failed, will retry on mandate webhook', [
                     'error' => $e->getMessage(),
+                    'order_id' => $order->id,
                 ]);
+                $order->update(['subscription_pending' => true]);
             }
 
             ActivityLog::create([
@@ -128,28 +148,96 @@ class WebhookController extends Controller
         }
     }
 
+    private function findClosestVfPackage(Server $server): ?int
+    {
+        try {
+            $result = $this->virtfusion->getPackages();
+            $packages = $result['data'] ?? [];
+
+            $ramMb = ($server->custom_ram ?? 2) * 1024;
+            $cpu = $server->custom_cpu ?? 1;
+            $storage = $server->custom_storage ?? 20;
+
+            $best = null;
+            $bestScore = PHP_INT_MAX;
+
+            foreach ($packages as $pkg) {
+                if (!($pkg['enabled'] ?? true)) continue;
+                if (($pkg['memory'] ?? 0) < $ramMb) continue;
+                if (($pkg['cpuCores'] ?? 0) < $cpu) continue;
+                if (($pkg['primaryStorage'] ?? 0) < $storage) continue;
+
+                $score = ($pkg['memory'] - $ramMb) + (($pkg['cpuCores'] - $cpu) * 1024) + (($pkg['primaryStorage'] - $storage) * 10);
+                if ($score < $bestScore) {
+                    $bestScore = $score;
+                    $best = $pkg['id'];
+                }
+            }
+
+            return $best;
+        } catch (\Exception $e) {
+            Log::error('Could not find matching VF package', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
     private function processUpgrade(Order $order): void
     {
         $server = $order->server;
         $newPackage = $order->package;
 
-        if (!$server || !$newPackage) return;
+        if (!$server) return;
 
         try {
-            if ($server->virtfusion_server_id) {
+            if ($newPackage && $server->virtfusion_server_id) {
                 $this->virtfusion->changeServerPackage(
                     $server->virtfusion_server_id,
                     $newPackage->virtfusion_package_id
                 );
+                $server->update(['package_id' => $newPackage->id]);
+            } elseif ($server->virtfusion_server_id && !empty($order->metadata['new_specs'])) {
+                $vfPackageId = $this->findClosestVfPackage($server);
+                if ($vfPackageId) {
+                    $this->virtfusion->changeServerPackage($server->virtfusion_server_id, $vfPackageId);
+                }
             }
 
-            $server->update(['package_id' => $newPackage->id]);
+            $oldSubscription = $server->orders()
+                ->whereNotNull('mollie_subscription_id')
+                ->latest()
+                ->first();
+
+            if ($oldSubscription?->mollie_subscription_id) {
+                try {
+                    $this->mollie->cancelSubscription($order->user, $oldSubscription->mollie_subscription_id);
+                } catch (\Exception $e) {
+                    Log::warning('Could not cancel old subscription', ['error' => $e->getMessage()]);
+                }
+            }
+
+            $interval = $this->mollie->getBillingInterval($order->billing_cycle);
+            try {
+                $newMonthly = $server->monthly_price ?? $order->amount;
+                $subscriptionOrder = $order->replicate();
+                $subscriptionOrder->amount = $newMonthly;
+                $subscriptionOrder->total = $newMonthly;
+                $subscriptionOrder->save();
+
+                $this->mollie->createSubscription($order->user, $subscriptionOrder, $interval);
+            } catch (\Exception $e) {
+                Log::warning('New subscription after upgrade failed', ['error' => $e->getMessage()]);
+            }
+
+            $specs = $order->metadata['new_specs'] ?? null;
+            $desc = $specs
+                ? "{$specs['ram_gb']}GB RAM, {$specs['cpu_core']} vCPU, {$specs['storage_gb']}GB SSD, {$specs['ipv4']} IPv4"
+                : ($newPackage ? $newPackage->name : 'custom configuratie');
 
             ActivityLog::create([
                 'user_id' => $order->user_id,
                 'server_id' => $server->id,
                 'action' => 'server.upgraded',
-                'description' => "Server '{$server->name}' geüpgraded naar {$newPackage->name}",
+                'description' => "Server '{$server->name}' geüpgraded naar {$desc}",
             ]);
         } catch (\Exception $e) {
             Log::error('Server upgrade failed', ['error' => $e->getMessage()]);

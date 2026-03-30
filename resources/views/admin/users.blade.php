@@ -28,10 +28,10 @@
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @foreach($users as $user)
-                <tr class="hover:bg-gray-50">
+                <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='{{ route('admin.users.show', $user) }}'">
                     <td class="px-6 py-4 text-sm text-gray-600">{{ $user->id }}</td>
                     <td class="px-6 py-4">
-                        <p class="text-sm font-medium text-gray-900">{{ $user->name }}</p>
+                        <a href="{{ route('admin.users.show', $user) }}" class="text-sm font-medium text-brand-600 hover:underline">{{ $user->name }}</a>
                         @if($user->company)<p class="text-xs text-gray-500">{{ $user->company }}</p>@endif
                     </td>
                     <td class="px-6 py-4 text-sm text-gray-600">{{ $user->email }}</td>

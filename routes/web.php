@@ -12,6 +12,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\Admin\AdminDashboardController;
 use App\Http\Controllers\Admin\AdminServerController;
+use App\Http\Controllers\Admin\AdminInvoiceController;
 use Illuminate\Support\Facades\Route;
 
 // ── Public ───────────────────────────────────────────────────────────
@@ -88,8 +89,21 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
     Route::get('/pricing', [AdminDashboardController::class, 'pricing'])->name('admin.pricing');
     Route::put('/pricing', [AdminDashboardController::class, 'updatePricing'])->name('admin.pricing.update');
 
+    // User detail
+    Route::get('/users/{user}', [AdminDashboardController::class, 'showUser'])->name('admin.users.show');
+
     // Sync users & servers from VirtFusion
     Route::post('/users/sync', [AdminDashboardController::class, 'syncUsers'])->name('admin.users.sync');
+
+    // Invoices
+    Route::get('/invoices', [AdminInvoiceController::class, 'index'])->name('admin.invoices.index');
+    Route::get('/invoices/create', [AdminInvoiceController::class, 'create'])->name('admin.invoices.create');
+    Route::post('/invoices', [AdminInvoiceController::class, 'store'])->name('admin.invoices.store');
+    Route::get('/invoices/{invoice}', [AdminInvoiceController::class, 'show'])->name('admin.invoices.show');
+    Route::get('/invoices/{invoice}/edit', [AdminInvoiceController::class, 'edit'])->name('admin.invoices.edit');
+    Route::put('/invoices/{invoice}', [AdminInvoiceController::class, 'update'])->name('admin.invoices.update');
+    Route::post('/invoices/{invoice}/mark-paid', [AdminInvoiceController::class, 'markPaid'])->name('admin.invoices.mark-paid');
+    Route::delete('/invoices/{invoice}', [AdminInvoiceController::class, 'destroy'])->name('admin.invoices.destroy');
 
     // Server management
     Route::get('/servers/{server}', [AdminServerController::class, 'show'])->name('admin.servers.show');

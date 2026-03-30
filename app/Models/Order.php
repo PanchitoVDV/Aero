@@ -22,6 +22,7 @@ class Order extends Model
         'billing_cycle',
         'mollie_payment_id',
         'mollie_subscription_id',
+        'subscription_pending',
         'metadata',
         'paid_at',
     ];

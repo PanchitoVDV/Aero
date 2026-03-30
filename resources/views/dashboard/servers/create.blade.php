@@ -34,7 +34,11 @@
                     <span class="text-xs text-gray-400 w-8">{{ $resource->max_value }}</span>
                 </div>
                 <div class="flex justify-between mt-1">
+                    @if($resource->resource_type === 'ipv4')
+                    <span class="text-xs text-gray-400">1x gratis inbegrepen, daarna &euro;{{ number_format($resource->price_per_unit, 2, ',', '.') }} per extra IP</span>
+                    @else
                     <span class="text-xs text-gray-400">&euro;{{ number_format($resource->price_per_unit, 4, ',', '.') }} per {{ $resource->unit }}</span>
+                    @endif
                 </div>
             </div>
             @endforeach
@@ -167,12 +171,18 @@
         sliderGroups.forEach(group => {
             const slider = group.querySelector('input[type="range"]');
             const price = parseFloat(group.dataset.price);
+            const resource = group.dataset.resource;
             const val = parseInt(slider.value);
-            const cost = val * price;
+            const billableUnits = (resource === 'ipv4') ? Math.max(0, val - 1) : val;
+            const cost = billableUnits * price;
             monthly += cost;
 
             group.querySelector('.slider-value').textContent = val;
-            group.querySelector('.slider-cost').textContent = formatEur(cost) + '/mnd';
+            if (resource === 'ipv4') {
+                group.querySelector('.slider-cost').textContent = val === 1 ? 'Gratis' : formatEur(cost) + '/mnd';
+            } else {
+                group.querySelector('.slider-cost').textContent = formatEur(cost) + '/mnd';
+            }
         });
 
         const quarterly = monthly * 3 * 0.95;

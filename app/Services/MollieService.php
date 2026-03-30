@@ -168,6 +168,7 @@ class MollieService
 
             if ($payment->hasSequenceTypeFirst() && $payment->mandateId) {
                 $order->user->update(['mollie_mandate_id' => $payment->mandateId]);
+                $this->retryPendingSubscriptions($order->user);
             }
 
             $this->createInvoice($order);
@@ -222,5 +223,25 @@ class MollieService
             'yearly' => '12 months',
             default => '1 month',
         };
+    }
+
+    public function retryPendingSubscriptions(User $user): void
+    {
+        $pendingOrders = Order::where('user_id', $user->id)
+            ->where('subscription_pending', true)
+            ->whereNull('mollie_subscription_id')
+            ->where('status', 'paid')
+            ->get();
+
+        foreach ($pendingOrders as $order) {
+            try {
+                $interval = $this->getBillingInterval($order->billing_cycle);
+                $this->createSubscription($user, $order, $interval);
+                $order->update(['subscription_pending' => false]);
+                Log::info('Retry subscription succeeded', ['order_id' => $order->id]);
+            } catch (\Exception $e) {
+                Log::warning('Retry subscription failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
+            }
+        }
     }
 }

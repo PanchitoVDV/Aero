@@ -23,7 +23,12 @@
                             <h3 class="text-sm font-semibold text-dark-900">{{ $resource->label }}</h3>
                             <p class="text-xs text-dark-400">Type: {{ $resource->resource_type }} | Eenheid: {{ $resource->unit }}</p>
                         </div>
-                        @if($resource->resource_type !== 'base_price')
+                        @if($resource->resource_type === 'ipv4')
+                        <div class="text-right">
+                            <span class="text-xs text-dark-400">1x gratis, daarna:</span>
+                            <span class="text-sm font-medium text-dark-700">&euro;{{ number_format($resource->price_per_unit, 2, ',', '.') }} per extra IP</span>
+                        </div>
+                        @elseif($resource->resource_type !== 'base_price')
                         <div class="text-right">
                             <span class="text-xs text-dark-400">Voorbeeld:</span>
                             <span class="text-sm font-medium text-dark-700">{{ $resource->default_value }} {{ $resource->unit }} = &euro;{{ number_format($resource->default_value * $resource->price_per_unit, 2, ',', '.') }}/mnd</span>
@@ -84,7 +89,11 @@
                 <div class="bg-dark-50 rounded-lg p-3 text-center">
                     <div class="text-xs text-dark-400 mb-1">{{ $r->label }}</div>
                     <div class="text-lg font-bold text-dark-900">{{ $r->default_value }} {{ $r->unit }}</div>
+                    @if($r->resource_type === 'ipv4')
+                    <div class="text-xs text-dark-500">1x gratis, extra &euro;{{ number_format($r->price_per_unit, 2, ',', '.') }}/IP</div>
+                    @else
                     <div class="text-xs text-dark-500">&euro;{{ number_format($r->price_per_unit, 4, ',', '.') }} / {{ $r->unit }}</div>
+                    @endif
                 </div>
                 @endforeach
             </div>
@@ -93,7 +102,11 @@
                 $basePrice = $resources->firstWhere('resource_type', 'base_price');
                 if ($basePrice) $examplePrice += $basePrice->price_per_unit;
                 foreach ($resources->where('resource_type', '!=', 'base_price') as $r) {
-                    $examplePrice += $r->default_value * $r->price_per_unit;
+                    if ($r->resource_type === 'ipv4') {
+                        $examplePrice += max(0, $r->default_value - 1) * $r->price_per_unit;
+                    } else {
+                        $examplePrice += $r->default_value * $r->price_per_unit;
+                    }
                 }
             @endphp
             <div class="text-center py-3 bg-brand-50 rounded-lg border border-brand-100">
