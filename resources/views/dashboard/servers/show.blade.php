@@ -15,14 +15,14 @@
     <div class="lg:col-span-2 space-y-6">
         {{-- Server Info --}}
         @php
-            $vfServer = $vfData['data'] ?? $vfData ?? null;
+            $vf = $vfData['data'] ?? $vfData ?? null;
+
+            // IP: network.interfaces[].ipv4[].address
             $liveIp = $server->ip_address;
-            if ($vfServer && !$liveIp) {
-                $interfaces = $vfServer['network']['interfaces'] ?? $vfServer['interfaces'] ?? [];
-                foreach ($interfaces as $iface) {
-                    $addrs = $iface['ipAddresses'] ?? $iface['addresses'] ?? [];
-                    foreach ($addrs as $addr) {
-                        $ip = $addr['address'] ?? $addr['ip'] ?? null;
+            if ($vf && !$liveIp) {
+                foreach ($vf['network']['interfaces'] ?? [] as $iface) {
+                    foreach ($iface['ipv4'] ?? [] as $ipEntry) {
+                        $ip = $ipEntry['address'] ?? null;
                         if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
                             $liveIp = $ip;
                             break 2;
@@ -30,33 +30,34 @@
                     }
                 }
             }
-            $liveMem = $vfServer['memory'] ?? $vfServer['ram'] ?? null;
-            $liveCpu = $vfServer['cpuCores'] ?? $vfServer['cpu'] ?? $vfServer['vcpus'] ?? null;
-            $liveDisk = $vfServer['primaryStorage'] ?? $vfServer['disk'] ?? $vfServer['storage'] ?? null;
-            $liveTraffic = $vfServer['traffic'] ?? $vfServer['bandwidth'] ?? null;
 
-            $osName = $server->os_template;
-            if (!$osName && $vfServer) {
-                $raw = $vfServer['osName'] ?? $vfServer['os'] ?? $vfServer['template'] ?? null;
-                if (is_string($raw)) {
-                    $osName = $raw;
-                } elseif (is_array($raw)) {
-                    $osName = $raw['name'] ?? $raw['label'] ?? $raw['title'] ?? json_encode($raw);
-                }
+            // Specs: settings.resources
+            $res = $vf['settings']['resources'] ?? [];
+            $liveMem = $res['memory'] ?? null;
+            $liveCpu = $res['cpuCores'] ?? $vf['cpu']['cores'] ?? null;
+
+            // Storage: storage[].capacity (primary)
+            $liveDisk = null;
+            foreach ($vf['storage'] ?? [] as $disk) {
+                if (!empty($disk['primary'])) { $liveDisk = $disk['capacity'] ?? null; break; }
             }
-            $osName = $osName ?: '-';
+            if (!$liveDisk && !empty($vf['storage'][0]['capacity'])) {
+                $liveDisk = $vf['storage'][0]['capacity'];
+            }
 
+            // Traffic: traffic.public.currentPeriod.limit
+            $liveTraffic = $vf['traffic']['public']['currentPeriod']['limit'] ?? null;
+
+            // OS: os.templateName
+            $osName = $server->os_template ?? $vf['os']['templateName'] ?? '-';
+
+            // Hostname
             $liveHostname = $server->hostname;
-            if (!$liveHostname && $vfServer) {
-                $hRaw = $vfServer['hostname'] ?? null;
+            if (!$liveHostname && $vf) {
+                $hRaw = $vf['hostname'] ?? null;
                 $liveHostname = is_string($hRaw) ? $hRaw : null;
             }
             $liveHostname = $liveHostname ?: '-';
-
-            if (is_array($liveMem)) $liveMem = null;
-            if (is_array($liveCpu)) $liveCpu = null;
-            if (is_array($liveDisk)) $liveDisk = null;
-            if (is_array($liveTraffic)) $liveTraffic = null;
         @endphp
 
         <div class="bg-white rounded-xl border border-gray-200 p-6">

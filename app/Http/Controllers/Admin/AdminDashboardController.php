@@ -153,90 +153,46 @@ class AdminDashboardController extends Controller
         $errors = [];
 
         try {
-            $vfServersResponse = $virtfusion->getServers();
-            $serverList = $vfServersResponse['data'] ?? [];
+            // VF listing is paginated; collect all pages
+            $serverList = [];
+            $page = 1;
+            do {
+                $resp = $virtfusion->getServersPaginated($page);
+                $pageData = $resp['data'] ?? [];
+                $serverList = array_merge($serverList, $pageData);
+                $lastPage = $resp['last_page'] ?? $page;
+                $page++;
+            } while ($page <= $lastPage);
 
             if (empty($serverList)) {
                 return back()->with('error', 'Geen servers gevonden in VirtFusion. Controleer je API token.');
             }
 
-            Log::info('VF Sync: server list keys (first server)', [
-                'keys' => array_keys($serverList[0] ?? []),
-                'sample' => array_intersect_key($serverList[0] ?? [], array_flip([
-                    'id', 'ownerId', 'name', 'hostname', 'state', 'commissionStatus',
-                ])),
-            ]);
-
             $processedUsers = [];
 
             foreach ($serverList as $vfSrvBasic) {
                 try {
+                    // Listing only has: id, uuid, name, commissioned, owner (int!), hypervisorId, suspended
+                    // We MUST fetch detail for IP, specs, and owner object
                     $vfServerDetail = $virtfusion->getServer($vfSrvBasic['id']);
                     $srv = $vfServerDetail['data'] ?? $vfServerDetail;
 
-                    if ($srv === $vfSrvBasic) {
-                        Log::info("VF Sync: getServer returned same as listing for #{$vfSrvBasic['id']}");
-                    }
-
-                    Log::info("VF Sync: server #{$vfSrvBasic['id']} detail keys", [
-                        'keys' => array_keys($srv),
-                        'hasOwner' => isset($srv['owner']),
-                        'ownerKeys' => isset($srv['owner']) ? array_keys($srv['owner']) : 'N/A',
-                    ]);
-
-                    $ownerId = $srv['ownerId'] ?? $vfSrvBasic['ownerId'] ?? null;
-                    if (!$ownerId) {
-                        $errors[] = "Server #{$vfSrvBasic['id']}: geen owner";
+                    // ── owner.id is the VF internal user ID ──
+                    $ownerData = $srv['owner'] ?? null;
+                    if (!is_array($ownerData) || empty($ownerData['email'])) {
+                        $errors[] = "Server #{$vfSrvBasic['id']} ({$vfSrvBasic['name']}): owner data ontbreekt";
                         continue;
                     }
 
-                    if (!isset($processedUsers[$ownerId])) {
-                        $ownerData = $srv['owner'] ?? null;
+                    $vfUserId = $ownerData['id']; // VF internal user id (e.g. 3)
 
-                        if (!$ownerData || empty($ownerData['email'])) {
-                            $ownerData = $srv['user'] ?? null;
-                        }
-
-                        if (!$ownerData || empty($ownerData['email'])) {
-                            $extRelId = $ownerData['extRelationId'] ?? $srv['extRelationId'] ?? null;
-                            if ($extRelId) {
-                                try {
-                                    $vfUserResponse = $virtfusion->getUser($extRelId);
-                                    $ownerData = $vfUserResponse['data'] ?? $vfUserResponse;
-                                } catch (\Exception $e) {
-                                    Log::warning("VF Sync: getUser by extRelId {$extRelId} failed", ['error' => $e->getMessage()]);
-                                }
-                            }
-                        }
-
-                        if (!$ownerData || empty($ownerData['email'])) {
-                            try {
-                                $userServersResp = $virtfusion->getUserServers($ownerId);
-                                $userServers = $userServersResp['data'] ?? [];
-                                if (!empty($userServers)) {
-                                    $firstServer = is_array($userServers[0] ?? null) ? $userServers[0] : $userServers;
-                                    $ownerData = $firstServer['owner'] ?? $firstServer['user'] ?? null;
-                                }
-                            } catch (\Exception $e) {
-                                Log::warning("VF Sync: getUserServers({$ownerId}) failed", ['error' => $e->getMessage()]);
-                            }
-                        }
-
-                        if (empty($ownerData['email'])) {
-                            Log::warning("VF Sync: no email for VF user #{$ownerId}", [
-                                'ownerData' => $ownerData,
-                                'serverKeys' => array_keys($srv),
-                            ]);
-                            $errors[] = "User #{$ownerId}: geen email gevonden in server response";
-                            continue;
-                        }
-
-                        $user = User::where('virtfusion_user_id', $ownerId)->first()
+                    if (!isset($processedUsers[$vfUserId])) {
+                        $user = User::where('virtfusion_user_id', $vfUserId)->first()
                             ?? User::where('email', $ownerData['email'])->first();
 
                         if ($user) {
                             $user->update([
-                                'virtfusion_user_id' => $ownerId,
+                                'virtfusion_user_id' => $vfUserId,
                                 'name' => $ownerData['name'] ?? $user->name,
                             ]);
                             $usersUpdated++;
@@ -245,38 +201,42 @@ class AdminDashboardController extends Controller
                                 'name' => $ownerData['name'] ?? $ownerData['email'],
                                 'email' => $ownerData['email'],
                                 'password' => Hash::make(Str::random(24)),
-                                'virtfusion_user_id' => $ownerId,
+                                'virtfusion_user_id' => $vfUserId,
                             ]);
                             $usersImported++;
                         }
 
-                        $processedUsers[$ownerId] = $user;
+                        $processedUsers[$vfUserId] = $user;
                     }
 
-                    $user = $processedUsers[$ownerId];
+                    $user = $processedUsers[$vfUserId];
 
-                    // ── Extract IP from full server details ──
+                    // ── IP: network.interfaces[].ipv4[].address ──
                     $ipAddress = $this->extractIpFromServer($srv);
 
-                    // ── Match or create package based on server specs ──
+                    // ── Specs: settings.resources.memory/cpuCores, storage[].capacity, cpu.cores ──
                     $packageId = $this->resolvePackageId($srv);
-
                     if (!$packageId) {
                         $errors[] = "Server '{$srv['name']}': geen pakket";
                         continue;
                     }
 
-                    // ── Determine status ──
+                    // ── Status ──
                     [$status, $powerStatus] = $this->resolveServerStatus($srv);
+
+                    // ── OS template name ──
+                    $osTemplate = $srv['os']['templateName'] ?? null;
 
                     // ── Create or update server ──
                     $existingServer = Server::where('virtfusion_server_id', $vfSrvBasic['id'])->first();
 
                     if ($existingServer) {
                         $existingServer->update([
+                            'user_id' => $user->id,
                             'name' => $srv['name'] ?? $existingServer->name,
                             'hostname' => $srv['hostname'] ?? $existingServer->hostname,
                             'ip_address' => $ipAddress ?? $existingServer->ip_address,
+                            'os_template' => $osTemplate ?? $existingServer->os_template,
                             'status' => $status,
                             'power_status' => $powerStatus,
                             'package_id' => $packageId,
@@ -289,6 +249,7 @@ class AdminDashboardController extends Controller
                             'virtfusion_server_id' => $vfSrvBasic['id'],
                             'name' => $srv['name'] ?? 'Server ' . $vfSrvBasic['id'],
                             'hostname' => $srv['hostname'] ?? null,
+                            'os_template' => $osTemplate,
                             'status' => $status,
                             'power_status' => $powerStatus,
                             'ip_address' => $ipAddress,
@@ -299,10 +260,7 @@ class AdminDashboardController extends Controller
                     }
 
                 } catch (\Exception $e) {
-                    Log::warning("Error syncing server #{$vfSrvBasic['id']}", [
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
+                    Log::warning("Error syncing server #{$vfSrvBasic['id']}", ['error' => $e->getMessage()]);
                     $errors[] = "Server #{$vfSrvBasic['id']}: {$e->getMessage()}";
                 }
             }
@@ -314,62 +272,75 @@ class AdminDashboardController extends Controller
 
             return back()->with('success', $message);
         } catch (\Exception $e) {
-            Log::error('User sync failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            Log::error('User sync failed', ['error' => $e->getMessage()]);
             return back()->with('error', 'Sync mislukt: ' . $e->getMessage());
         }
     }
 
+    /**
+     * Extract IPv4 address from VF server detail.
+     * Path: network.interfaces[].ipv4[].address
+     */
     private function extractIpFromServer(array $srv): ?string
     {
-        $searchPaths = [
-            $srv['network']['interfaces'] ?? null,
-            $srv['interfaces'] ?? null,
-            $srv['networkInterfaces'] ?? null,
-        ];
+        $interfaces = $srv['network']['interfaces'] ?? [];
 
-        foreach ($searchPaths as $interfaces) {
-            if (!is_array($interfaces)) continue;
-            foreach ($interfaces as $iface) {
-                $addrSources = [
-                    $iface['ipAddresses'] ?? [],
-                    $iface['addresses'] ?? [],
-                    $iface['ips'] ?? [],
-                ];
-                foreach ($addrSources as $addrs) {
-                    foreach ($addrs as $addr) {
-                        $ip = is_array($addr) ? ($addr['address'] ?? $addr['ip'] ?? null) : $addr;
-                        if (is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-                            return $ip;
-                        }
-                    }
+        foreach ($interfaces as $iface) {
+            foreach ($iface['ipv4'] ?? [] as $ipEntry) {
+                $ip = $ipEntry['address'] ?? null;
+                if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    return $ip;
                 }
             }
         }
 
-        return $srv['ip'] ?? $srv['primaryIp'] ?? null;
+        return null;
     }
 
+    /**
+     * Resolve or create a Package based on VF server specs.
+     * Specs: settings.resources.memory / settings.resources.cpuCores
+     * Storage: storage[0].capacity (primary disk)
+     * Traffic: traffic.public.currentPeriod.limit
+     */
     private function resolvePackageId(array $srv): ?int
     {
-        $memory = $srv['memory'] ?? $srv['ram'] ?? 0;
-        $cpuCores = $srv['cpuCores'] ?? $srv['cpu'] ?? $srv['vcpus'] ?? 0;
-        $storage = $srv['primaryStorage'] ?? $srv['disk'] ?? $srv['storage'] ?? 0;
-        $traffic = $srv['traffic'] ?? $srv['bandwidth'] ?? 0;
+        $resources = $srv['settings']['resources'] ?? [];
+        $memory = (int) ($resources['memory'] ?? 0);
+        $cpuCores = (int) ($resources['cpuCores'] ?? $srv['cpu']['cores'] ?? 0);
 
-        if (isset($srv['packageId'])) {
-            $package = Package::where('virtfusion_package_id', $srv['packageId'])->first();
+        $storage = 0;
+        foreach ($srv['storage'] ?? [] as $disk) {
+            if (!empty($disk['primary'])) {
+                $storage = (int) ($disk['capacity'] ?? 0);
+                break;
+            }
+        }
+        if ($storage === 0 && !empty($srv['storage'][0]['capacity'])) {
+            $storage = (int) $srv['storage'][0]['capacity'];
+        }
+
+        $traffic = (int) ($srv['traffic']['public']['currentPeriod']['limit'] ?? 0);
+
+        // Try matching by specs
+        if ($memory > 0 && $cpuCores > 0) {
+            $package = Package::where('memory', $memory)
+                ->where('cpu_cores', $cpuCores)
+                ->where('storage', $storage)
+                ->first();
+            if ($package) return $package->id;
+
+            $package = Package::where('memory', $memory)
+                ->where('cpu_cores', $cpuCores)
+                ->first();
             if ($package) return $package->id;
         }
 
+        // Auto-create package from specs
         if ($memory > 0 || $cpuCores > 0) {
-            $package = Package::where('memory', $memory)->where('cpu_cores', $cpuCores)->first();
-            if ($package) return $package->id;
-        }
-
-        if (isset($srv['packageId'])) {
+            $memLabel = $memory >= 1024 ? round($memory / 1024) . 'GB' : $memory . 'MB';
             $newPkg = Package::create([
-                'virtfusion_package_id' => $srv['packageId'],
-                'name' => 'VPS ' . ($memory >= 1024 ? round($memory / 1024) . 'GB' : $memory . 'MB') . ' - ' . $cpuCores . 'vCPU',
+                'name' => "VPS {$memLabel} - {$cpuCores}vCPU - {$storage}GB",
                 'category' => 'vps',
                 'memory' => $memory ?: 1024,
                 'storage' => $storage ?: 20,

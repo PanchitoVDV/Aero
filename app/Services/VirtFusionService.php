@@ -198,6 +198,13 @@ class VirtFusionService
         return $this->handleResponse($response, 'getServers');
     }
 
+    // GET /servers?page={page} (paginated)
+    public function getServersPaginated(int $page = 1): array
+    {
+        $response = $this->request()->get('/servers', ['page' => $page]);
+        return $this->handleResponse($response, 'getServersPaginated');
+    }
+
     // GET /servers/{serverId}
     public function getServer(int $serverId): array
     {

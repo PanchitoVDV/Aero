@@ -105,28 +105,25 @@ class ServerController extends Controller
                 if ($srv) {
                     $updates = [];
 
+                    // IP: network.interfaces[].ipv4[].address
                     if (!$server->ip_address) {
-                        $interfaces = $srv['network']['interfaces'] ?? $srv['interfaces'] ?? [];
-                        foreach ($interfaces as $iface) {
-                            $addrs = $iface['ipAddresses'] ?? $iface['addresses'] ?? [];
-                            foreach ($addrs as $addr) {
-                                $ip = $addr['address'] ?? $addr['ip'] ?? null;
+                        foreach ($srv['network']['interfaces'] ?? [] as $iface) {
+                            foreach ($iface['ipv4'] ?? [] as $ipEntry) {
+                                $ip = $ipEntry['address'] ?? null;
                                 if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
                                     $updates['ip_address'] = $ip;
                                     break 2;
                                 }
                             }
                         }
-                        if (empty($updates['ip_address']) && isset($srv['ip'])) {
-                            $updates['ip_address'] = $srv['ip'];
-                        }
-                        if (empty($updates['ip_address']) && isset($srv['primaryIp'])) {
-                            $updates['ip_address'] = $srv['primaryIp'];
-                        }
                     }
 
-                    if (!$server->hostname && !empty($srv['hostname'])) {
+                    if (!$server->hostname && is_string($srv['hostname'] ?? null) && $srv['hostname']) {
                         $updates['hostname'] = $srv['hostname'];
+                    }
+
+                    if (!$server->os_template && isset($srv['os']['templateName'])) {
+                        $updates['os_template'] = $srv['os']['templateName'];
                     }
 
                     $state = $srv['state'] ?? '';
