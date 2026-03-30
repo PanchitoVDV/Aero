@@ -78,4 +78,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
 
     // Sync users & servers from VirtFusion
     Route::post('/users/sync', [AdminDashboardController::class, 'syncUsers'])->name('admin.users.sync');
+
+    // Debug: show raw VirtFusion API response (temporary)
+    Route::get('/debug/vf-api', [AdminDashboardController::class, 'debugVfApi'])->name('admin.debug.vfapi');
 });

@@ -405,4 +405,37 @@ class AdminDashboardController extends Controller
 
         return [$status, $powerStatus];
     }
+
+    public function debugVfApi(VirtFusionService $virtfusion)
+    {
+        $output = [];
+
+        try {
+            $serversResponse = $virtfusion->getServers();
+            $output['getServers_keys'] = array_keys($serversResponse);
+            $serverList = $serversResponse['data'] ?? $serversResponse;
+            $output['server_count'] = is_array($serverList) ? count($serverList) : 'not_array';
+
+            if (is_array($serverList) && !empty($serverList)) {
+                $first = $serverList[0] ?? $serverList[array_key_first($serverList)] ?? null;
+                if ($first) {
+                    $output['listing_first_server'] = $first;
+                }
+
+                $serverId = $first['id'] ?? null;
+                if ($serverId) {
+                    try {
+                        $detail = $virtfusion->getServer($serverId);
+                        $output['getServer_detail'] = $detail;
+                    } catch (\Exception $e) {
+                        $output['getServer_error'] = $e->getMessage();
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            $output['getServers_error'] = $e->getMessage();
+        }
+
+        return response()->json($output, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    }
 }
