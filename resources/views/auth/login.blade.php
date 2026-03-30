@@ -6,6 +6,12 @@
     <h2 class="text-2xl font-bold text-gray-900 text-center mb-2">Welkom terug</h2>
     <p class="text-gray-500 text-center mb-8">Log in op je Aero account</p>
 
+    @if (session('status'))
+        <div class="mb-6 p-4 rounded-lg bg-green-50 border border-green-200">
+            <p class="text-sm text-green-700">{{ session('status') }}</p>
+        </div>
+    @endif
+
     <form method="POST" action="{{ route('login') }}" class="space-y-5">
         @csrf
 
@@ -32,6 +38,7 @@
                 <input type="checkbox" name="remember" class="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500">
                 <span class="text-sm text-gray-600">Onthoud mij</span>
             </label>
+            <a href="{{ route('password.request') }}" class="text-sm text-brand-600 font-medium hover:underline">Wachtwoord vergeten?</a>
         </div>
 
         <button type="submit" class="w-full bg-brand-600 text-white font-semibold py-2.5 rounded-lg hover:bg-brand-700 transition">
