@@ -8,6 +8,9 @@ use App\Models\Server;
 use App\Models\Order;
 use App\Models\Package;
 use App\Services\VirtFusionService;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class AdminDashboardController extends Controller
 {
@@ -139,5 +142,141 @@ class AdminDashboardController extends Controller
     {
         $orders = Order::with(['user', 'package', 'server'])->latest()->paginate(25);
         return view('admin.orders', compact('orders'));
+    }
+
+    public function syncUsers(VirtFusionService $virtfusion)
+    {
+        $imported = 0;
+        $updated = 0;
+        $serversImported = 0;
+        $errors = [];
+
+        try {
+            $vfServers = $virtfusion->getServers();
+            $serverList = $vfServers['data'] ?? [];
+
+            $userIds = collect($serverList)->pluck('ownerId')->unique();
+
+            foreach ($userIds as $vfUserId) {
+                try {
+                    $vfServerData = $virtfusion->getServer(
+                        collect($serverList)->where('ownerId', $vfUserId)->first()['id']
+                    );
+                    $serverData = $vfServerData['data'] ?? $vfServerData;
+
+                    $ownerData = $serverData['owner'] ?? null;
+
+                    if (!$ownerData || empty($ownerData['email'])) {
+                        try {
+                            $vfUserResponse = $virtfusion->getUser($vfUserId);
+                            $ownerData = $vfUserResponse['data'] ?? $vfUserResponse;
+                        } catch (\Exception $e) {
+                            Log::warning("Could not fetch VF user {$vfUserId}", ['error' => $e->getMessage()]);
+                            continue;
+                        }
+                    }
+
+                    if (empty($ownerData['email'])) {
+                        continue;
+                    }
+
+                    $user = User::where('virtfusion_user_id', $vfUserId)
+                        ->orWhere('email', $ownerData['email'])
+                        ->first();
+
+                    if ($user) {
+                        $user->update(['virtfusion_user_id' => $vfUserId]);
+                        $updated++;
+                    } else {
+                        $user = User::create([
+                            'name' => $ownerData['name'] ?? $ownerData['email'],
+                            'email' => $ownerData['email'],
+                            'password' => Hash::make(Str::random(24)),
+                            'virtfusion_user_id' => $vfUserId,
+                        ]);
+                        $imported++;
+                    }
+
+                    $userServers = collect($serverList)->where('ownerId', $vfUserId);
+                    foreach ($userServers as $vfSrv) {
+                        $existingServer = Server::where('virtfusion_server_id', $vfSrv['id'])->first();
+                        if ($existingServer) {
+                            continue;
+                        }
+
+                        $packageId = null;
+                        if (isset($vfSrv['packageId'])) {
+                            $package = Package::where('virtfusion_package_id', $vfSrv['packageId'])->first();
+                            $packageId = $package?->id;
+                        }
+
+                        if (!$packageId) {
+                            $packageId = Package::first()?->id;
+                        }
+
+                        if (!$packageId) {
+                            $errors[] = "Server '{$vfSrv['name']}': geen pakket gevonden";
+                            continue;
+                        }
+
+                        $ipAddress = null;
+                        if (isset($vfSrv['network']['interfaces'])) {
+                            foreach ($vfSrv['network']['interfaces'] as $iface) {
+                                if (!empty($iface['ipAddresses'])) {
+                                    $ipAddress = $iface['ipAddresses'][0]['address'] ?? null;
+                                    break;
+                                }
+                            }
+                        }
+
+                        $status = 'active';
+                        if (isset($vfSrv['suspended']) && $vfSrv['suspended']) {
+                            $status = 'suspended';
+                        } elseif (isset($vfSrv['state'])) {
+                            $status = match ($vfSrv['state']) {
+                                'running', 'active' => 'active',
+                                'stopped', 'shutoff' => 'active',
+                                'suspended' => 'suspended',
+                                'building' => 'building',
+                                default => 'active',
+                            };
+                        }
+
+                        $powerStatus = 'offline';
+                        if (isset($vfSrv['state'])) {
+                            $powerStatus = in_array($vfSrv['state'], ['running', 'active']) ? 'online' : 'offline';
+                        }
+
+                        Server::create([
+                            'user_id' => $user->id,
+                            'package_id' => $packageId,
+                            'virtfusion_server_id' => $vfSrv['id'],
+                            'name' => $vfSrv['name'] ?? 'Server ' . $vfSrv['id'],
+                            'hostname' => $vfSrv['hostname'] ?? null,
+                            'status' => $status,
+                            'power_status' => $powerStatus,
+                            'ip_address' => $ipAddress,
+                            'billing_cycle' => 'monthly',
+                            'next_due_date' => now()->addMonth(),
+                        ]);
+
+                        $serversImported++;
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Error syncing VF user {$vfUserId}", ['error' => $e->getMessage()]);
+                    $errors[] = "User {$vfUserId}: {$e->getMessage()}";
+                }
+            }
+
+            $message = "Sync voltooid: {$imported} users geimporteerd, {$updated} bijgewerkt, {$serversImported} servers geimporteerd.";
+            if (!empty($errors)) {
+                $message .= ' Waarschuwingen: ' . implode('; ', array_slice($errors, 0, 5));
+            }
+
+            return back()->with('success', $message);
+        } catch (\Exception $e) {
+            Log::error('User sync failed', ['error' => $e->getMessage()]);
+            return back()->with('error', 'Sync mislukt: ' . $e->getMessage());
+        }
     }
 }

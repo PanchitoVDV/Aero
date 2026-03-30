@@ -128,7 +128,8 @@ sed -i "s|VIRTFUSION_API_TOKEN=your-virtfusion-api-token|VIRTFUSION_API_TOKEN=${
 sed -i "s|VIRTFUSION_HYPERVISOR_GROUP_ID=1|VIRTFUSION_HYPERVISOR_GROUP_ID=${VF_HV_GROUP}|g" .env
 sed -i "s|MOLLIE_KEY=test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|MOLLIE_KEY=${MOLLIE_KEY}|g" .env
 sed -i "s|MOLLIE_WEBHOOK_URL=https://your-domain.com/webhooks/mollie|MOLLIE_WEBHOOK_URL=https://${DOMAIN}/webhooks/mollie|g" .env
-sed -i "s|CLOUDITO_SUPPORT_EMAIL=support@cloudito.nl|CLOUDITO_SUPPORT_EMAIL=${SUPPORT_EMAIL}|g" .env
+sed -i "s|CLOUDITO_SUPPORT_EMAIL=support@cloudito.nl|CLOUDITO_SUPPORT_EMAIL=\"${SUPPORT_EMAIL}\"|g" .env
+sed -i "s|MAIL_FROM_ADDRESS=\"noreply@cloudito.nl\"|MAIL_FROM_ADDRESS=\"${SUPPORT_EMAIL}\"|g" .env
 
 php artisan key:generate --force
 php artisan migrate --force
