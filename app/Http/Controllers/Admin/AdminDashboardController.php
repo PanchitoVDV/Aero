@@ -340,6 +340,7 @@ class AdminDashboardController extends Controller
         if ($memory > 0 || $cpuCores > 0) {
             $memLabel = $memory >= 1024 ? round($memory / 1024) . 'GB' : $memory . 'MB';
             $newPkg = Package::create([
+                'virtfusion_package_id' => 0,
                 'name' => "VPS {$memLabel} - {$cpuCores}vCPU - {$storage}GB",
                 'category' => 'vps',
                 'memory' => $memory ?: 1024,
