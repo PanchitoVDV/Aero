@@ -3,47 +3,67 @@
 @section('header', 'Nieuwe Server Aanmaken')
 
 @section('content')
-<form method="POST" action="{{ route('servers.store') }}" class="max-w-4xl">
+<form method="POST" action="{{ route('servers.store') }}" class="max-w-4xl" id="serverForm">
     @csrf
 
-    {{-- Package Selection --}}
+    {{-- Server Configurator --}}
     <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">1. Kies je pakket</h2>
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            @foreach($packages as $package)
-            <label class="relative cursor-pointer">
-                <input type="radio" name="package_id" value="{{ $package->id }}" class="peer sr-only" {{ old('package_id') == $package->id ? 'checked' : '' }} required>
-                <div class="border-2 border-gray-200 rounded-xl p-5 peer-checked:border-brand-500 peer-checked:bg-brand-50 hover:border-gray-300 transition">
-                    @if($package->is_featured)
-                    <span class="absolute -top-2 right-3 bg-brand-600 text-white text-xs font-semibold px-2 py-0.5 rounded-full">Populair</span>
-                    @endif
-                    <h3 class="text-base font-semibold text-gray-900">{{ $package->name }}</h3>
-                    <p class="text-2xl font-bold text-gray-900 mt-2">&euro;{{ number_format($package->price_monthly, 2, ',', '.') }}<span class="text-sm font-normal text-gray-400">/mnd</span></p>
-                    <div class="mt-3 space-y-1.5 text-sm text-gray-600">
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                            {{ $package->cpu_cores }} vCPU {{ $package->cpu_cores > 1 ? 'Cores' : 'Core' }}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                            {{ $package->formatted_memory }} RAM
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                            {{ $package->formatted_storage }} NVMe SSD
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <svg class="w-4 h-4 text-brand-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-                            {{ $package->formatted_traffic }} Verkeer
-                        </div>
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">1. Configureer je server</h2>
+        <p class="text-sm text-gray-500 mb-6">Pas de resources aan met de sliders. De prijs wordt live berekend.</p>
+
+        <div class="space-y-6">
+            @foreach($pricing->where('resource_type', '!=', 'base_price') as $resource)
+            <div class="slider-group" data-resource="{{ $resource->resource_type }}" data-price="{{ $resource->price_per_unit }}">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-sm font-medium text-gray-700">{{ $resource->label }}</label>
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg font-bold text-gray-900 slider-value">{{ $resource->default_value }}</span>
+                        <span class="text-sm text-gray-500">{{ $resource->unit }}</span>
+                        <span class="text-xs text-gray-400 ml-2 slider-cost">&euro;{{ number_format($resource->default_value * $resource->price_per_unit, 2, ',', '.') }}/mnd</span>
                     </div>
                 </div>
-            </label>
+                <div class="flex items-center gap-4">
+                    <span class="text-xs text-gray-400 w-8 text-right">{{ $resource->min_value }}</span>
+                    <input type="range"
+                        name="{{ $resource->resource_type }}"
+                        min="{{ $resource->min_value }}"
+                        max="{{ $resource->max_value }}"
+                        step="{{ $resource->step }}"
+                        value="{{ old($resource->resource_type, $resource->default_value) }}"
+                        class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-brand-600">
+                    <span class="text-xs text-gray-400 w-8">{{ $resource->max_value }}</span>
+                </div>
+                <div class="flex justify-between mt-1">
+                    <span class="text-xs text-gray-400">&euro;{{ number_format($resource->price_per_unit, 4, ',', '.') }} per {{ $resource->unit }}</span>
+                </div>
+            </div>
             @endforeach
         </div>
-        @error('package_id')
-            <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
-        @enderror
+    </div>
+
+    {{-- Price Summary --}}
+    <div class="bg-gradient-to-r from-brand-600 to-brand-700 rounded-xl p-6 mb-6 text-white">
+        <div class="flex items-center justify-between">
+            <div>
+                <h3 class="text-sm font-medium text-brand-100">Geschatte maandprijs</h3>
+                <div class="flex items-baseline gap-1 mt-1">
+                    <span class="text-3xl font-bold" id="totalPrice">&euro;0,00</span>
+                    <span class="text-brand-200">/mnd</span>
+                </div>
+            </div>
+            <div class="text-right space-y-1">
+                <div class="text-xs text-brand-200">Kwartaal (5% korting): <span id="quarterlyPrice" class="font-semibold text-white">&euro;0,00</span></div>
+                <div class="text-xs text-brand-200">Jaarlijks (15% korting): <span id="yearlyPrice" class="font-semibold text-white">&euro;0,00</span></div>
+            </div>
+        </div>
+        @php
+            $basePrice = $pricing->firstWhere('resource_type', 'base_price');
+        @endphp
+        @if($basePrice && $basePrice->price_per_unit > 0)
+        <div class="mt-3 pt-3 border-t border-brand-500 text-xs text-brand-200">
+            Inclusief basisprijs van &euro;{{ number_format($basePrice->price_per_unit, 2, ',', '.') }}/mnd
+        </div>
+        @endif
     </div>
 
     {{-- Server Details --}}
@@ -100,6 +120,7 @@
                 <div class="border-2 border-gray-200 rounded-xl p-4 text-center peer-checked:border-brand-500 peer-checked:bg-brand-50 hover:border-gray-300 transition">
                     <p class="text-sm font-semibold text-gray-900">Maandelijks</p>
                     <p class="text-xs text-gray-500 mt-1">Flexibel opzegbaar</p>
+                    <p class="text-sm font-bold text-gray-900 mt-2 cycle-price" data-cycle="monthly"></p>
                 </div>
             </label>
             <label class="cursor-pointer">
@@ -107,6 +128,7 @@
                 <div class="border-2 border-gray-200 rounded-xl p-4 text-center peer-checked:border-brand-500 peer-checked:bg-brand-50 hover:border-gray-300 transition">
                     <p class="text-sm font-semibold text-gray-900">Per Kwartaal</p>
                     <p class="text-xs text-green-600 mt-1">Bespaar 5%</p>
+                    <p class="text-sm font-bold text-gray-900 mt-2 cycle-price" data-cycle="quarterly"></p>
                 </div>
             </label>
             <label class="cursor-pointer">
@@ -114,6 +136,7 @@
                 <div class="border-2 border-gray-200 rounded-xl p-4 text-center peer-checked:border-brand-500 peer-checked:bg-brand-50 hover:border-gray-300 transition">
                     <p class="text-sm font-semibold text-gray-900">Per Jaar</p>
                     <p class="text-xs text-green-600 mt-1">Bespaar 15%</p>
+                    <p class="text-sm font-bold text-gray-900 mt-2 cycle-price" data-cycle="yearly"></p>
                 </div>
             </label>
         </div>
@@ -128,4 +151,72 @@
         </button>
     </div>
 </form>
+
+<script>
+(function() {
+    const basePrice = {{ $basePrice ? $basePrice->price_per_unit : 0 }};
+    const sliderGroups = document.querySelectorAll('.slider-group');
+
+    function formatEur(value) {
+        return '\u20AC' + value.toFixed(2).replace('.', ',');
+    }
+
+    function calculatePrice() {
+        let monthly = basePrice;
+
+        sliderGroups.forEach(group => {
+            const slider = group.querySelector('input[type="range"]');
+            const price = parseFloat(group.dataset.price);
+            const val = parseInt(slider.value);
+            const cost = val * price;
+            monthly += cost;
+
+            group.querySelector('.slider-value').textContent = val;
+            group.querySelector('.slider-cost').textContent = formatEur(cost) + '/mnd';
+        });
+
+        const quarterly = monthly * 3 * 0.95;
+        const yearly = monthly * 12 * 0.85;
+
+        document.getElementById('totalPrice').textContent = formatEur(monthly);
+        document.getElementById('quarterlyPrice').textContent = formatEur(quarterly);
+        document.getElementById('yearlyPrice').textContent = formatEur(yearly);
+
+        document.querySelectorAll('.cycle-price').forEach(el => {
+            switch(el.dataset.cycle) {
+                case 'monthly': el.textContent = formatEur(monthly); break;
+                case 'quarterly': el.textContent = formatEur(quarterly) + '/kw'; break;
+                case 'yearly': el.textContent = formatEur(yearly) + '/jr'; break;
+            }
+        });
+    }
+
+    sliderGroups.forEach(group => {
+        group.querySelector('input[type="range"]').addEventListener('input', calculatePrice);
+    });
+
+    calculatePrice();
+})();
+</script>
+
+<style>
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        background: #2563eb;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: #2563eb;
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+</style>
 @endsection

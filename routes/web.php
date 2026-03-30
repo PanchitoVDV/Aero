@@ -84,6 +84,10 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
     Route::put('/packages/{package}', [AdminDashboardController::class, 'updatePackage'])->name('admin.packages.update');
     Route::post('/packages/sync', [AdminDashboardController::class, 'syncPackages'])->name('admin.packages.sync');
 
+    // Resource Pricing
+    Route::get('/pricing', [AdminDashboardController::class, 'pricing'])->name('admin.pricing');
+    Route::put('/pricing', [AdminDashboardController::class, 'updatePricing'])->name('admin.pricing.update');
+
     // Sync users & servers from VirtFusion
     Route::post('/users/sync', [AdminDashboardController::class, 'syncUsers'])->name('admin.users.sync');
 

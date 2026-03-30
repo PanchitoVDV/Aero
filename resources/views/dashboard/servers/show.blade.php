@@ -73,7 +73,7 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Pakket</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->name ?? '-' }}</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->name ?? 'Custom configuratie' }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">OS</p>
@@ -81,12 +81,18 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">CPU</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveCpu ?? $server->package->cpu_cores ?? '-' }} vCPU</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveCpu ?? $server->custom_cpu ?? $server->package->cpu_cores ?? '-' }} vCPU</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">RAM</p>
                     @php
-                        $memVal = $liveMem ?? ($server->package ? $server->package->memory : null);
+                        $memVal = $liveMem;
+                        if (!$memVal && $server->custom_ram) {
+                            $memVal = $server->custom_ram * 1024;
+                        }
+                        if (!$memVal && $server->package) {
+                            $memVal = $server->package->memory;
+                        }
                         $memDisplay = '-';
                         if ($memVal && is_numeric($memVal)) {
                             $memDisplay = $memVal >= 1024 ? round($memVal / 1024, 1) . ' GB' : $memVal . ' MB';
@@ -97,7 +103,7 @@
                 <div>
                     <p class="text-sm text-gray-500">Opslag</p>
                     @php
-                        $diskVal = $liveDisk ?? ($server->package ? $server->package->storage : null);
+                        $diskVal = $liveDisk ?? $server->custom_storage ?? ($server->package ? $server->package->storage : null);
                         $diskDisplay = is_numeric($diskVal) ? $diskVal . ' GB NVMe SSD' : '-';
                     @endphp
                     <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $diskDisplay }}</p>
@@ -212,12 +218,8 @@
                 </form>
                 @endif
                 <a href="{{ route('servers.upgrade', $server) }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition text-sm font-medium text-gray-700">
-                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
-                    Upgraden
-                </a>
-                <a href="{{ route('servers.downgrade', $server) }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition text-sm font-medium text-gray-700">
-                    <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-                    Downgraden
+                    <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    Resources Aanpassen
                 </a>
             </div>
         </div>
@@ -226,6 +228,7 @@
         <div class="bg-white rounded-xl border border-gray-200 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Facturering</h2>
             <div class="space-y-3">
+                @if($server->package)
                 <div class="flex justify-between text-sm">
                     <span class="text-gray-500">Pakket</span>
                     <span class="font-medium text-gray-900">{{ $server->package->name }}</span>
@@ -234,6 +237,16 @@
                     <span class="text-gray-500">Prijs</span>
                     <span class="font-medium text-gray-900">&euro;{{ number_format($server->package->getPriceForCycle($server->billing_cycle), 2, ',', '.') }}</span>
                 </div>
+                @else
+                <div class="flex justify-between text-sm">
+                    <span class="text-gray-500">Configuratie</span>
+                    <span class="font-medium text-gray-900">{{ $server->custom_ram ?? '-' }}GB / {{ $server->custom_cpu ?? '-' }} vCPU / {{ $server->custom_storage ?? '-' }}GB SSD</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-gray-500">Prijs</span>
+                    <span class="font-medium text-gray-900">&euro;{{ number_format($server->monthly_price ?? 0, 2, ',', '.') }}/mnd</span>
+                </div>
+                @endif
                 <div class="flex justify-between text-sm">
                     <span class="text-gray-500">Cyclus</span>
                     <span class="font-medium text-gray-900">{{ ucfirst($server->billing_cycle === 'monthly' ? 'Maandelijks' : ($server->billing_cycle === 'quarterly' ? 'Per kwartaal' : 'Per jaar')) }}</span>

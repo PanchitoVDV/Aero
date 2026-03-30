@@ -7,7 +7,9 @@ use App\Models\User;
 use App\Models\Server;
 use App\Models\Order;
 use App\Models\Package;
+use App\Models\ResourcePricing;
 use App\Services\VirtFusionService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -409,5 +411,35 @@ class AdminDashboardController extends Controller
         }
 
         return response()->json($output, 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    }
+
+    public function pricing()
+    {
+        $resources = ResourcePricing::orderBy('id')->get();
+
+        if ($resources->isEmpty()) {
+            (new \Database\Seeders\ResourcePricingSeeder())->run();
+            $resources = ResourcePricing::orderBy('id')->get();
+        }
+
+        return view('admin.pricing', compact('resources'));
+    }
+
+    public function updatePricing(Request $request)
+    {
+        $data = $request->validate([
+            'resources' => 'required|array',
+            'resources.*.price_per_unit' => 'required|numeric|min:0',
+            'resources.*.min_value' => 'required|integer|min:0',
+            'resources.*.max_value' => 'required|integer|min:1',
+            'resources.*.step' => 'required|integer|min:1',
+            'resources.*.default_value' => 'required|integer|min:0',
+        ]);
+
+        foreach ($data['resources'] as $id => $values) {
+            ResourcePricing::where('id', $id)->update($values);
+        }
+
+        return redirect()->route('admin.pricing')->with('success', 'Prijzen succesvol bijgewerkt.');
     }
 }

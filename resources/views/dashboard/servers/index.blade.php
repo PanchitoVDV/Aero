@@ -46,6 +46,13 @@
                         <span>{{ $server->package->formatted_memory }} RAM</span>
                         <span>&middot;</span>
                         <span>{{ $server->package->cpu_cores }} vCPU</span>
+                    @elseif($server->custom_ram)
+                        <span>&middot;</span>
+                        <span>{{ $server->custom_ram }}GB RAM</span>
+                        <span>&middot;</span>
+                        <span>{{ $server->custom_cpu }} vCPU</span>
+                        <span>&middot;</span>
+                        <span>{{ $server->custom_storage }}GB SSD</span>
                     @endif
                 </div>
             </div>
@@ -53,6 +60,11 @@
             <div class="text-right flex-shrink-0">
                 <p class="text-sm font-semibold text-gray-900">&euro;{{ number_format($server->package->getPriceForCycle($server->billing_cycle ?? 'monthly'), 2, ',', '.') }}</p>
                 <p class="text-xs text-gray-500">per {{ ($server->billing_cycle ?? 'monthly') === 'monthly' ? 'maand' : (($server->billing_cycle ?? 'monthly') === 'quarterly' ? 'kwartaal' : 'jaar') }}</p>
+            </div>
+            @elseif($server->monthly_price)
+            <div class="text-right flex-shrink-0">
+                <p class="text-sm font-semibold text-gray-900">&euro;{{ number_format($server->monthly_price, 2, ',', '.') }}</p>
+                <p class="text-xs text-gray-500">per maand</p>
             </div>
             @endif
             <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>

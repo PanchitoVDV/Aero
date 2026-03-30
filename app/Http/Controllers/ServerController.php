@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Package;
+use App\Models\ResourcePricing;
 use App\Models\Server;
 use App\Models\Order;
 use App\Models\ActivityLog;
@@ -27,49 +28,85 @@ class ServerController extends Controller
 
     public function create()
     {
-        $packages = Package::active()->orderBy('sort_order')->get();
-        return view('dashboard.servers.create', compact('packages'));
+        $pricing = ResourcePricing::orderBy('id')->get();
+
+        if ($pricing->isEmpty()) {
+            (new \Database\Seeders\ResourcePricingSeeder())->run();
+            $pricing = ResourcePricing::orderBy('id')->get();
+        }
+
+        return view('dashboard.servers.create', compact('pricing'));
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'package_id' => ['required', 'exists:packages,id'],
+            'ram_gb' => ['required', 'integer', 'min:1'],
+            'cpu_core' => ['required', 'integer', 'min:1'],
+            'storage_gb' => ['required', 'integer', 'min:10'],
+            'ipv4' => ['required', 'integer', 'min:1'],
             'name' => ['required', 'string', 'max:100'],
             'hostname' => ['required', 'string', 'max:255', 'regex:/^[a-zA-Z0-9.-]+$/'],
             'billing_cycle' => ['required', 'in:monthly,quarterly,yearly'],
             'os_template' => ['required', 'string'],
         ]);
 
-        $user = Auth::user();
-        $package = Package::findOrFail($validated['package_id']);
+        $pricingAll = ResourcePricing::all()->keyBy('resource_type');
+        foreach (['ram_gb', 'cpu_core', 'storage_gb', 'ipv4'] as $type) {
+            $rule = $pricingAll->get($type);
+            if ($rule && ($validated[$type] < $rule->min_value || $validated[$type] > $rule->max_value)) {
+                return back()->withErrors([$type => "{$rule->label} moet tussen {$rule->min_value} en {$rule->max_value} liggen."])->withInput();
+            }
+        }
 
-        $amount = $package->getPriceForCycle($validated['billing_cycle']);
-        $total = $amount + (float)$package->setup_fee;
+        $user = Auth::user();
+        $monthlyPrice = ResourcePricing::calculateMonthlyPrice(
+            $validated['ram_gb'],
+            $validated['cpu_core'],
+            $validated['storage_gb'],
+            $validated['ipv4']
+        );
+        $cyclePrice = ResourcePricing::calculateForCycle(
+            $validated['ram_gb'],
+            $validated['cpu_core'],
+            $validated['storage_gb'],
+            $validated['ipv4'],
+            $validated['billing_cycle']
+        );
 
         $server = Server::create([
             'user_id' => $user->id,
-            'package_id' => $package->id,
+            'package_id' => null,
             'name' => $validated['name'],
             'hostname' => $validated['hostname'],
             'os_template' => $validated['os_template'],
             'billing_cycle' => $validated['billing_cycle'],
+            'custom_ram' => $validated['ram_gb'],
+            'custom_cpu' => $validated['cpu_core'],
+            'custom_storage' => $validated['storage_gb'],
+            'custom_ipv4' => $validated['ipv4'],
+            'monthly_price' => $monthlyPrice,
             'status' => 'pending',
         ]);
 
         $order = Order::create([
             'user_id' => $user->id,
             'server_id' => $server->id,
-            'package_id' => $package->id,
+            'package_id' => null,
             'type' => 'new',
             'status' => 'pending',
-            'amount' => $amount,
-            'setup_fee' => $package->setup_fee,
-            'total' => $total,
+            'amount' => $cyclePrice,
+            'setup_fee' => 0,
+            'total' => $cyclePrice,
             'billing_cycle' => $validated['billing_cycle'],
             'metadata' => [
                 'os_template' => $validated['os_template'],
                 'hostname' => $validated['hostname'],
+                'ram_gb' => $validated['ram_gb'],
+                'cpu_core' => $validated['cpu_core'],
+                'storage_gb' => $validated['storage_gb'],
+                'ipv4' => $validated['ipv4'],
+                'monthly_price' => $monthlyPrice,
             ],
         ]);
 
@@ -77,7 +114,7 @@ class ServerController extends Controller
             'user_id' => $user->id,
             'server_id' => $server->id,
             'action' => 'server.ordered',
-            'description' => "Server '{$server->name}' besteld met pakket {$package->name}",
+            'description' => "Server '{$server->name}' besteld: {$validated['ram_gb']}GB RAM, {$validated['cpu_core']} vCPU, {$validated['storage_gb']}GB SSD, {$validated['ipv4']} IPv4",
             'ip_address' => $request->ip(),
         ]);
 
@@ -196,14 +233,21 @@ class ServerController extends Controller
     {
         $this->authorizeServer($server);
 
-        $currentPackage = $server->package;
-        $packages = Package::active()
-            ->where('price_monthly', '>', $currentPackage->price_monthly)
-            ->where('category', $currentPackage->category)
-            ->orderBy('price_monthly')
-            ->get();
+        $pricing = ResourcePricing::orderBy('id')->get();
+        if ($pricing->isEmpty()) {
+            (new \Database\Seeders\ResourcePricingSeeder())->run();
+            $pricing = ResourcePricing::orderBy('id')->get();
+        }
 
-        return view('dashboard.servers.upgrade', compact('server', 'currentPackage', 'packages'));
+        $currentSpecs = $this->getServerSpecs($server);
+        $currentMonthly = $server->monthly_price ?? ResourcePricing::calculateMonthlyPrice(
+            $currentSpecs['ram'], $currentSpecs['cpu'], $currentSpecs['storage'], $currentSpecs['ipv4']
+        );
+
+        $basePriceRow = $pricing->firstWhere('resource_type', 'base_price');
+        $basePrice = $basePriceRow ? (float) $basePriceRow->price_per_unit : 0;
+
+        return view('dashboard.servers.upgrade', compact('server', 'pricing', 'currentSpecs', 'currentMonthly', 'basePrice'));
     }
 
     public function processUpgrade(Request $request, Server $server)
@@ -211,99 +255,124 @@ class ServerController extends Controller
         $this->authorizeServer($server);
 
         $validated = $request->validate([
-            'package_id' => ['required', 'exists:packages,id'],
+            'ram_gb' => ['required', 'integer', 'min:1'],
+            'cpu_core' => ['required', 'integer', 'min:1'],
+            'storage_gb' => ['required', 'integer', 'min:10'],
+            'ipv4' => ['required', 'integer', 'min:1'],
         ]);
 
         $user = Auth::user();
-        $newPackage = Package::findOrFail($validated['package_id']);
-        $currentPackage = $server->package;
+        $currentSpecs = $this->getServerSpecs($server);
+        $currentMonthly = $server->monthly_price ?? ResourcePricing::calculateMonthlyPrice(
+            $currentSpecs['ram'], $currentSpecs['cpu'], $currentSpecs['storage'], $currentSpecs['ipv4']
+        );
 
-        if ($newPackage->price_monthly <= $currentPackage->price_monthly) {
-            return back()->with('error', 'Selecteer een hoger pakket voor een upgrade.');
-        }
+        $newMonthly = ResourcePricing::calculateMonthlyPrice(
+            $validated['ram_gb'], $validated['cpu_core'], $validated['storage_gb'], $validated['ipv4']
+        );
 
-        $priceDiff = $newPackage->getPriceForCycle($server->billing_cycle) - $currentPackage->getPriceForCycle($server->billing_cycle);
+        $diff = round($newMonthly - $currentMonthly, 2);
+        $isUpgrade = $diff > 0;
 
-        $order = Order::create([
-            'user_id' => $user->id,
-            'server_id' => $server->id,
-            'package_id' => $newPackage->id,
-            'type' => 'upgrade',
-            'status' => 'pending',
-            'amount' => $priceDiff,
-            'setup_fee' => 0,
-            'total' => $priceDiff,
-            'billing_cycle' => $server->billing_cycle,
-            'metadata' => [
-                'old_package_id' => $currentPackage->id,
-                'new_package_id' => $newPackage->id,
-            ],
+        $server->update([
+            'custom_ram' => $validated['ram_gb'],
+            'custom_cpu' => $validated['cpu_core'],
+            'custom_storage' => $validated['storage_gb'],
+            'custom_ipv4' => $validated['ipv4'],
+            'monthly_price' => $newMonthly,
+            'package_id' => null,
         ]);
 
-        try {
-            $payment = $this->mollie->createFirstPayment($user, $order, route('servers.show', $server->id));
-            return redirect($payment->getCheckoutUrl());
-        } catch (\Exception $e) {
-            Log::error('Upgrade payment failed', ['error' => $e->getMessage()]);
-            $order->update(['status' => 'failed']);
-            return back()->with('error', 'Betaling kon niet worden aangemaakt.');
+        $specStr = "{$validated['ram_gb']}GB RAM, {$validated['cpu_core']} vCPU, {$validated['storage_gb']}GB SSD, {$validated['ipv4']} IPv4";
+
+        if ($isUpgrade) {
+            $cycleDiff = match ($server->billing_cycle) {
+                'quarterly' => round($diff * 3 * 0.95, 2),
+                'yearly' => round($diff * 12 * 0.85, 2),
+                default => $diff,
+            };
+
+            $order = Order::create([
+                'user_id' => $user->id,
+                'server_id' => $server->id,
+                'package_id' => null,
+                'type' => 'upgrade',
+                'status' => 'pending',
+                'amount' => $cycleDiff,
+                'setup_fee' => 0,
+                'total' => $cycleDiff,
+                'billing_cycle' => $server->billing_cycle,
+                'metadata' => [
+                    'old_specs' => $currentSpecs,
+                    'new_specs' => $validated,
+                    'old_monthly' => $currentMonthly,
+                    'new_monthly' => $newMonthly,
+                ],
+            ]);
+
+            ActivityLog::create([
+                'user_id' => $user->id,
+                'server_id' => $server->id,
+                'action' => 'server.upgraded',
+                'description' => "Server '{$server->name}' geupgraded naar {$specStr}",
+                'ip_address' => $request->ip(),
+            ]);
+
+            try {
+                $payment = $this->mollie->createFirstPayment($user, $order, route('servers.show', $server->id));
+                return redirect($payment->getCheckoutUrl());
+            } catch (\Exception $e) {
+                Log::error('Upgrade payment failed', ['error' => $e->getMessage()]);
+                $order->update(['status' => 'failed']);
+                return back()->with('error', 'Betaling kon niet worden aangemaakt.');
+            }
         }
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'server_id' => $server->id,
+            'action' => 'server.downgraded',
+            'description' => "Server '{$server->name}' gedowngraded naar {$specStr}",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return redirect()->route('servers.show', $server)
+            ->with('success', "Server resources aangepast naar {$specStr}. De wijziging gaat in op de volgende factureringsperiode.");
     }
 
     public function downgrade(Server $server)
     {
         $this->authorizeServer($server);
-
-        $currentPackage = $server->package;
-        $packages = Package::active()
-            ->where('price_monthly', '<', $currentPackage->price_monthly)
-            ->where('category', $currentPackage->category)
-            ->orderByDesc('price_monthly')
-            ->get();
-
-        return view('dashboard.servers.downgrade', compact('server', 'currentPackage', 'packages'));
+        return redirect()->route('servers.upgrade', $server);
     }
 
     public function processDowngrade(Request $request, Server $server)
     {
-        $this->authorizeServer($server);
+        return $this->processUpgrade($request, $server);
+    }
 
-        $validated = $request->validate([
-            'package_id' => ['required', 'exists:packages,id'],
-        ]);
-
-        $user = Auth::user();
-        $newPackage = Package::findOrFail($validated['package_id']);
-        $currentPackage = $server->package;
-
-        if ($newPackage->price_monthly >= $currentPackage->price_monthly) {
-            return back()->with('error', 'Selecteer een lager pakket voor een downgrade.');
+    private function getServerSpecs(Server $server): array
+    {
+        if ($server->custom_ram) {
+            return [
+                'ram' => $server->custom_ram,
+                'cpu' => $server->custom_cpu ?? 1,
+                'storage' => $server->custom_storage ?? 20,
+                'ipv4' => $server->custom_ipv4 ?? 1,
+            ];
         }
 
-        try {
-            if ($server->virtfusion_server_id) {
-                $this->virtfusion->changeServerPackage(
-                    $server->virtfusion_server_id,
-                    $newPackage->virtfusion_package_id
-                );
-            }
-
-            $server->update(['package_id' => $newPackage->id]);
-
-            ActivityLog::create([
-                'user_id' => $user->id,
-                'server_id' => $server->id,
-                'action' => 'server.downgraded',
-                'description' => "Server '{$server->name}' gedowngraded van {$currentPackage->name} naar {$newPackage->name}",
-                'ip_address' => $request->ip(),
-            ]);
-
-            return redirect()->route('servers.show', $server)
-                ->with('success', 'Server succesvol gedowngraded naar ' . $newPackage->name);
-        } catch (\Exception $e) {
-            Log::error('Downgrade failed', ['error' => $e->getMessage()]);
-            return back()->with('error', 'Downgrade mislukt: ' . $e->getMessage());
+        $package = $server->package;
+        if ($package) {
+            return [
+                'ram' => (int) ceil(($package->memory ?? 1024) / 1024),
+                'cpu' => $package->cpu_cores ?? 1,
+                'storage' => $package->storage ?? 20,
+                'ipv4' => 1,
+            ];
         }
+
+        return ['ram' => 2, 'cpu' => 1, 'storage' => 20, 'ipv4' => 1];
     }
 
     public function resetPassword(Request $request, Server $server)
