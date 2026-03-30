@@ -105,11 +105,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$INSTALL_DIR"
 cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/" 2>/dev/null || true
 cp -r "$SCRIPT_DIR"/.env.example "$INSTALL_DIR/" 2>/dev/null || true
+cp -r "$SCRIPT_DIR"/.gitignore "$INSTALL_DIR/" 2>/dev/null || true
 
 cd "$INSTALL_DIR"
 
 # ── 5. Laravel configuratie ──────────────────────────────────────────
 echo -e "${CYAN}[5/8] Laravel configureren...${NC}"
+export COMPOSER_ALLOW_SUPERUSER=1
 composer install --no-dev --optimize-autoloader --no-interaction
 
 cp .env.example .env
