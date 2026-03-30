@@ -100,6 +100,50 @@ class ServerController extends Controller
         if ($server->virtfusion_server_id) {
             try {
                 $vfData = $this->virtfusion->getServer($server->virtfusion_server_id);
+                $srv = $vfData['data'] ?? $vfData ?? null;
+
+                if ($srv) {
+                    $updates = [];
+
+                    if (!$server->ip_address) {
+                        $interfaces = $srv['network']['interfaces'] ?? $srv['interfaces'] ?? [];
+                        foreach ($interfaces as $iface) {
+                            $addrs = $iface['ipAddresses'] ?? $iface['addresses'] ?? [];
+                            foreach ($addrs as $addr) {
+                                $ip = $addr['address'] ?? $addr['ip'] ?? null;
+                                if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                                    $updates['ip_address'] = $ip;
+                                    break 2;
+                                }
+                            }
+                        }
+                        if (empty($updates['ip_address']) && isset($srv['ip'])) {
+                            $updates['ip_address'] = $srv['ip'];
+                        }
+                        if (empty($updates['ip_address']) && isset($srv['primaryIp'])) {
+                            $updates['ip_address'] = $srv['primaryIp'];
+                        }
+                    }
+
+                    if (!$server->hostname && !empty($srv['hostname'])) {
+                        $updates['hostname'] = $srv['hostname'];
+                    }
+
+                    $state = $srv['state'] ?? '';
+                    $commissionStatus = $srv['commissionStatus'] ?? null;
+                    if (in_array($state, ['running', 'active'])) {
+                        $updates['power_status'] = 'online';
+                    } elseif ($state === 'complete' && $commissionStatus === 3) {
+                        $updates['power_status'] = 'online';
+                    } else {
+                        $updates['power_status'] = 'offline';
+                    }
+
+                    if (!empty($updates)) {
+                        $server->update($updates);
+                        $server->refresh();
+                    }
+                }
             } catch (\Exception $e) {
                 Log::warning('Could not fetch VirtFusion server data', ['error' => $e->getMessage()]);
             }

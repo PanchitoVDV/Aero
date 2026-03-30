@@ -14,16 +14,38 @@
     {{-- Left Column --}}
     <div class="lg:col-span-2 space-y-6">
         {{-- Server Info --}}
+        @php
+            $vfServer = $vfData['data'] ?? $vfData ?? null;
+            $liveIp = $server->ip_address;
+            if ($vfServer && !$liveIp) {
+                $interfaces = $vfServer['network']['interfaces'] ?? $vfServer['interfaces'] ?? [];
+                foreach ($interfaces as $iface) {
+                    $addrs = $iface['ipAddresses'] ?? $iface['addresses'] ?? [];
+                    foreach ($addrs as $addr) {
+                        $ip = $addr['address'] ?? $addr['ip'] ?? null;
+                        if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                            $liveIp = $ip;
+                            break 2;
+                        }
+                    }
+                }
+            }
+            $liveMem = $vfServer['memory'] ?? $vfServer['ram'] ?? null;
+            $liveCpu = $vfServer['cpuCores'] ?? $vfServer['cpu'] ?? $vfServer['vcpus'] ?? null;
+            $liveDisk = $vfServer['primaryStorage'] ?? $vfServer['disk'] ?? $vfServer['storage'] ?? null;
+            $liveTraffic = $vfServer['traffic'] ?? $vfServer['bandwidth'] ?? null;
+        @endphp
+
         <div class="bg-white rounded-xl border border-gray-200 p-6">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">Server Informatie</h2>
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <p class="text-sm text-gray-500">IP Adres</p>
-                    <p class="text-sm font-mono font-medium text-gray-900 mt-0.5">{{ $server->ip_address ?? 'Wordt toegewezen...' }}</p>
+                    <p class="text-sm font-mono font-medium text-gray-900 mt-0.5">{{ $liveIp ?? 'Wordt toegewezen...' }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Hostname</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->hostname ?? '-' }}</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $vfServer['hostname'] ?? $server->hostname ?? '-' }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Pakket</p>
@@ -31,23 +53,39 @@
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">OS</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->os_template ?? '-' }}</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->os_template ?? ($vfServer['osName'] ?? '-') }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">CPU</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->cpu_cores ?? '-' }} vCPU</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveCpu ?? $server->package->cpu_cores ?? '-' }} vCPU</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">RAM</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->formatted_memory ?? '-' }}</p>
+                    @php
+                        $memVal = $liveMem ?? ($server->package ? $server->package->memory : null);
+                        $memDisplay = '-';
+                        if ($memVal) {
+                            $memDisplay = $memVal >= 1024 ? round($memVal / 1024, 1) . ' GB' : $memVal . ' MB';
+                        }
+                    @endphp
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $memDisplay }}</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Opslag</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->formatted_storage ?? '-' }} NVMe SSD</p>
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $liveDisk ?? ($server->package ? $server->package->storage : '-') }} GB NVMe SSD</p>
                 </div>
                 <div>
                     <p class="text-sm text-gray-500">Verkeer</p>
-                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $server->package->formatted_traffic ?? '-' }}</p>
+                    @php
+                        $trafficVal = $liveTraffic ?? ($server->package ? $server->package->traffic : null);
+                        $trafficDisplay = '-';
+                        if ($trafficVal !== null) {
+                            if ($trafficVal == 0) $trafficDisplay = 'Onbeperkt';
+                            elseif ($trafficVal >= 1000) $trafficDisplay = round($trafficVal / 1000, 1) . ' TB';
+                            else $trafficDisplay = $trafficVal . ' GB';
+                        }
+                    @endphp
+                    <p class="text-sm font-medium text-gray-900 mt-0.5">{{ $trafficDisplay }}</p>
                 </div>
             </div>
         </div>
